@@ -54,7 +54,7 @@ export class RestaurantsService {
       ownerEmail: dto.email.trim().toLowerCase(),
       ownerId: user._id,
       commercialPhone: dto.commercialPhone,
-      status: RestaurantStatus.PENDING,
+      status: RestaurantStatus.APPROVED,
       reviewNote: '',
       isOpen: false,
 
