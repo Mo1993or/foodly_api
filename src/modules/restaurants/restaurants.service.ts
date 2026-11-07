@@ -16,6 +16,7 @@ import {
   Restaurant,
   RestaurantDocument,
   RestaurantStatus,
+  SubscriptionStatus,
 } from './schemas/restaurant.schema';
 
 import { RegisterRestaurantDto } from './dto/register-restaurant.dto';
@@ -55,6 +56,13 @@ export class RestaurantsService {
       commercialPhone: dto.commercialPhone,
       status: RestaurantStatus.PENDING,
       reviewNote: '',
+      isOpen: false,
+
+      activeOffer: 'Free',
+      subscriptionStatus: SubscriptionStatus.NOT_STARTED,
+      trialStartedAt: null,
+      trialEndsAt: null,
+      subscriptionExpiresAt: null,
     });
 
     return {
@@ -93,14 +101,28 @@ export class RestaurantsService {
       );
     }
 
+    // Début de l'essai gratuit au moment de l'approbation.
+    const trialStartedAt = new Date();
+
+    // Durée de l'essai : 10 jours.
+    const trialEndsAt = new Date(
+      trialStartedAt.getTime() + 10 * 24 * 60 * 60 * 1000,
+    );
+
     restaurant.status = RestaurantStatus.APPROVED;
     restaurant.reviewedBy = new Types.ObjectId(reviewerId);
     restaurant.reviewNote = '';
 
+    restaurant.activeOffer = 'Free';
+    restaurant.subscriptionStatus = SubscriptionStatus.TRIAL;
+    restaurant.trialStartedAt = trialStartedAt;
+    restaurant.trialEndsAt = trialEndsAt;
+    restaurant.subscriptionExpiresAt = null;
+
     await restaurant.save();
 
     return {
-      message: 'Restaurant approuvé avec succès.',
+      message: 'Restaurant approuvé. Essai gratuit de 10 jours activé.',
       data: restaurant,
     };
   }
@@ -148,5 +170,107 @@ export class RestaurantsService {
     }
 
     return restaurant;
+  }
+
+  async findPublicRestaurants(
+    category?: string,
+    search?: string,
+  ) {
+    const filter: any = {
+      status: RestaurantStatus.APPROVED,
+    };
+
+    if (category?.trim()) {
+      filter.restaurantType = {
+        $regex: `^${category.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+        $options: 'i',
+      };
+    }
+
+    if (search?.trim()) {
+      filter.name = {
+        $regex: search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        $options: 'i',
+      };
+    }
+
+    return this.restaurantModel
+      .find(filter)
+      .select('-reviewNote -reviewedBy')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  async updateOpenStatus(
+    restaurantId: string,
+    ownerId: string,
+    isOpen: boolean,
+  ) {
+    if (typeof isOpen !== 'boolean') {
+      throw new BadRequestException(
+        'Le champ isOpen doit être un booléen.',
+      );
+    }
+
+    const restaurant = await this.findRestaurantById(restaurantId);
+
+    if (restaurant.ownerId.toString() !== ownerId) {
+      throw new BadRequestException(
+        'Vous ne pouvez modifier que votre propre restaurant.',
+      );
+    }
+
+    if (restaurant.status !== RestaurantStatus.APPROVED) {
+      throw new BadRequestException(
+        'Le restaurant doit être approuvé avant de modifier son état.',
+      );
+    }
+
+    restaurant.isOpen = isOpen;
+    await restaurant.save();
+
+    return {
+      message: isOpen
+        ? 'Le restaurant est maintenant ouvert.'
+        : 'Le restaurant est maintenant fermé.',
+      data: restaurant,
+    };
+  }
+
+  findRestaurantTypes() {
+    return [
+      'Tout',
+      'Restaurant traditionnel',
+      'Fast-food',
+      'Pizzeria',
+      'Grillades',
+      'Cuisine sénégalaise',
+      'Cuisine africaine',
+      'Cuisine asiatique',
+      'Pâtisserie',
+      'Boulangerie',
+      'Café',
+      'Jus et boissons',
+      'Restaurant gastronomique',
+      'Végétarien',
+      'Fruits de mer',
+      'Autre',
+    ];
+  }
+
+  /**
+   * Récupération du restaurant associé à un restaurateur.
+   */
+  async findByOwnerId(ownerId: string) {
+    if (!Types.ObjectId.isValid(ownerId)) {
+      return null;
+    }
+
+    return this.restaurantModel
+      .findOne({
+        ownerId: new Types.ObjectId(ownerId),
+      })
+      .select('-ownerId -reviewedBy')
+      .exec();
   }
 }

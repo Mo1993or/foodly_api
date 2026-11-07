@@ -7,6 +7,10 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/user.module';
 import { MediaModule } from './modules/media/media.module';
 import { RestaurantsModule } from './modules/restaurants/restaurants.module';
+import { ProductsModule } from './modules/products/products.module';
+import { OrdersModule } from './modules/orders/orders.module';
+import { OffersModule } from './modules/offers/offers.module';
+import { SubscriptionsModule } from './modules/subscription/subscriptions.module';
 
 @Module({
   imports: [
@@ -52,7 +56,11 @@ import { RestaurantsModule } from './modules/restaurants/restaurants.module';
     MediaModule,
     AuthModule,
     UsersModule,
-    RestaurantsModule
+    RestaurantsModule,
+    ProductsModule,
+    OrdersModule,
+    OffersModule,
+    SubscriptionsModule
   ],
 })
 export class AppModule {}

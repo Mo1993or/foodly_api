@@ -12,6 +12,14 @@ export enum RestaurantStatus {
   SUSPENDED = 'suspended',
 }
 
+export enum SubscriptionStatus {
+  NOT_STARTED = 'not_started',
+  TRIAL = 'trial',
+  ACTIVE = 'active',
+  PENDING_PAYMENT = 'pending_payment',
+  EXPIRED = 'expired',
+}
+
 @Schema({
   timestamps: true,
   versionKey: false,
@@ -54,21 +62,21 @@ export class Restaurant {
   })
   restaurantType: string;
 
-  // Logo facultatif
+  // Logo
   @Prop({
     trim: true,
     default: '',
   })
   logoUrl: string;
 
-  // Photo de couverture facultative
+  // Photo de couverture
   @Prop({
     trim: true,
     default: '',
   })
   coverPhotoUrl: string;
 
-  // Tableau facultatif de deux couleurs maximum
+  // Couleurs
   @Prop({
     type: [String],
     default: [],
@@ -80,7 +88,7 @@ export class Restaurant {
   })
   colors: string[];
 
-  // Coordonnées GPS facultatives
+  // Coordonnées GPS
   @Prop({
     type: Number,
     min: -90,
@@ -111,7 +119,7 @@ export class Restaurant {
   })
   ownerEmail: string;
 
-  // Lien vers le compte utilisateur du propriétaire
+  // Compte utilisateur propriétaire
   @Prop({
     type: Types.ObjectId,
     ref: User.name,
@@ -120,7 +128,7 @@ export class Restaurant {
   })
   ownerId: Types.ObjectId;
 
-  // Statut de validation du restaurant
+  // Validation du restaurant
   @Prop({
     required: true,
     enum: RestaurantStatus,
@@ -129,23 +137,61 @@ export class Restaurant {
   })
   status: RestaurantStatus;
 
-  // Administrateur ayant traité la demande
   @Prop({
     type: Types.ObjectId,
     ref: User.name,
   })
   reviewedBy?: Types.ObjectId;
 
-  // Motif du refus ou note administrative
   @Prop({
     trim: true,
     maxlength: 1000,
     default: '',
   })
   reviewNote: string;
-  
+
   @Prop({ trim: true })
   commercialPhone?: string;
+
+  @Prop({ type: Boolean, default: false })
+  isOpen: boolean;
+
+  // Offre actuellement active
+  @Prop({
+    type: String,
+    default: 'Free',
+  })
+  activeOffer: string;
+
+  // Statut de l'abonnement
+  @Prop({
+    type: String,
+    enum: SubscriptionStatus,
+    default: SubscriptionStatus.NOT_STARTED,
+    index: true,
+  })
+  subscriptionStatus: SubscriptionStatus;
+
+  // Début de l'essai gratuit
+  @Prop({
+    type: Date,
+    default: null,
+  })
+  trialStartedAt: Date | null;
+
+  // Fin de l'essai gratuit
+  @Prop({
+    type: Date,
+    default: null,
+  })
+  trialEndsAt: Date | null;
+
+  // Expiration de l'abonnement payant
+  @Prop({
+    type: Date,
+    default: null,
+  })
+  subscriptionExpiresAt: Date | null;
 }
 
 export const RestaurantSchema =

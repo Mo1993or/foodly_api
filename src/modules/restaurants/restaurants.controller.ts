@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -38,14 +39,19 @@ export class RestaurantsController {
     return this.restaurantsService.registerRestaurant(dto);
   }
 
-  // Routes administratives protégées
+  // Liste publique avec filtres
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  findAll() {
-    return this.restaurantsService.findAll();
+  findPublicRestaurants(
+    @Query('category') category?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.restaurantsService.findPublicRestaurants(
+      category,
+      search,
+    );
   }
 
+  // Routes administratives protégées
   @Get('pending')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
@@ -80,4 +86,24 @@ export class RestaurantsController {
       dto.reviewNote,
     );
   }
+  @Patch(':id/open-status')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.RESTAURATEUR)
+updateOpenStatus(
+  @Param('id') id: string,
+  @Body('isOpen') isOpen: boolean,
+  @Req() request: AuthenticatedRequest,
+) {
+  return this.restaurantsService.updateOpenStatus(
+    id,
+    request.user.sub,
+    isOpen,
+  );
+}
+@Get('types')
+findRestaurantTypes() {
+  return {
+    data: this.restaurantsService.findRestaurantTypes(),
+  };
+}
 }

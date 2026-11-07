@@ -2,9 +2,12 @@
 import {
   Injectable,
   UnauthorizedException,
-  ConflictException,
   NotImplementedException,
+  Inject,
 } from '@nestjs/common';
+
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -12,31 +15,30 @@ import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/user.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+
 import {
   UserRole,
   UserStatus,
 } from '../users/shemas/user.shema';
+
+import { Restaurant } from '../restaurants/schemas/restaurant.schema';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+
+    @InjectModel(Restaurant.name)
+    private readonly restaurantModel: Model<Restaurant>,
   ) {}
 
-  /**
-   * Inscription publique désactivée.
-   * Les comptes professionnels seront créés via des routes protégées.
-   */
   async register(_dto: RegisterDto) {
     throw new NotImplementedException(
       'L’inscription publique est désactivée. Contactez Foodly pour obtenir un compte professionnel.',
     );
   }
 
-  /**
-   * Connexion du Super Admin, de l'Admin ou du Restaurateur.
-   */
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmail(dto.email);
 
@@ -74,9 +76,6 @@ export class AuthService {
     );
   }
 
-  /**
-   * Création de la session JWT.
-   */
   private async createSession(user: {
     _id: unknown;
     name: string;
@@ -91,10 +90,25 @@ export class AuthService {
 
     const accessToken = await this.jwtService.signAsync(payload);
 
+    let restaurant = null;
+
+    if (user.role === UserRole.RESTAURATEUR) {
+      if (Types.ObjectId.isValid(String(user._id))) {
+        restaurant = await this.restaurantModel
+          .findOne({
+            ownerId: new Types.ObjectId(String(user._id)),
+          })
+          .select('-reviewedBy')
+          .lean()
+          .exec();
+      }
+    }
+
     return {
       message: 'Connexion réussie.',
       data: {
         user,
+        restaurant,
         accessToken,
         tokenType: 'Bearer',
         expiresIn: '1d',
