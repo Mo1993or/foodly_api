@@ -58,7 +58,7 @@ export class RestaurantsService {
       reviewNote: '',
       isOpen: false,
 
-      activeOffer: 'Free',
+      activeOffer: '',
       subscriptionStatus: SubscriptionStatus.NOT_STARTED,
       trialStartedAt: null,
       trialEndsAt: null,

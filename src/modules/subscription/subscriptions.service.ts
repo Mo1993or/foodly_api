@@ -5,7 +5,6 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 
@@ -17,37 +16,33 @@ import {
 
 import {
   Offer,
-  OfferDocument,
-  OfferCode,
   OfferBillingPeriod,
+  OfferCode,
 } from '../offers/schemas/offer.schema';
 
 import {
   Restaurant,
-  RestaurantDocument,
   RestaurantStatus,
   SubscriptionStatus,
 } from '../restaurants/schemas/restaurant.schema';
 
-import { UserRole } from '../users/shemas/user.shema';
 import { ActivateSubscriptionDto } from './dto/activate-subscription.dto';
 
 @Injectable()
 export class SubscriptionsService {
-  [x: string]: any;
   constructor(
     @InjectModel(Subscription.name)
     private readonly subscriptionModel: Model<SubscriptionDocument>,
 
     @InjectModel(Offer.name)
-    private readonly offerModel: Model<OfferDocument>,
+    private readonly offerModel: Model<Offer>,
 
     @InjectModel(Restaurant.name)
-    private readonly restaurantModel: Model<RestaurantDocument>,
+    private readonly restaurantModel: Model<Restaurant>,
   ) {}
 
   /**
-   * Le restaurateur demande une souscription.
+   * Création d'une demande d'abonnement par un restaurateur.
    */
   async createRequest(
     restaurantId: string,
@@ -58,14 +53,10 @@ export class SubscriptionsService {
       !Types.ObjectId.isValid(restaurantId) ||
       !Types.ObjectId.isValid(offerId)
     ) {
-      throw new BadRequestException(
-        'Identifiant du restaurant ou de l’offre invalide.',
-      );
+      throw new BadRequestException('Identifiant invalide.');
     }
 
-    const restaurant = await this.restaurantModel
-      .findById(restaurantId)
-      .exec();
+    const restaurant = await this.restaurantModel.findById(restaurantId);
 
     if (!restaurant) {
       throw new NotFoundException('Restaurant introuvable.');
@@ -73,54 +64,48 @@ export class SubscriptionsService {
 
     if (restaurant.ownerId.toString() !== userId) {
       throw new ForbiddenException(
-        'Vous ne pouvez souscrire que pour votre propre restaurant.',
+        'Vous ne pouvez pas gérer cet abonnement.',
       );
     }
 
     if (restaurant.status !== RestaurantStatus.APPROVED) {
-      throw new BadRequestException(
-        'Le restaurant doit être approuvé avant de souscrire à une offre.',
+      throw new ForbiddenException(
+        'Votre restaurant doit être approuvé avant de souscrire.',
       );
     }
 
-    const offer = await this.offerModel
-      .findOne({
-        _id: offerId,
-        isActive: true,
-      })
-      .exec();
+    const offer = await this.offerModel.findOne({
+      _id: offerId,
+      isActive: true,
+    });
 
     if (!offer) {
       throw new NotFoundException('Offre introuvable ou inactive.');
     }
 
-    if (offer.code === OfferCode.FREE) {
+    if (
+      offer.code === OfferCode.FREE ||
+      offer.price <= 0 ||
+      offer.billingPeriod !== OfferBillingPeriod.MONTHLY
+    ) {
       throw new BadRequestException(
-        'L’offre Free est une période d’essai et ne peut pas être souscrite ici.',
+        'Cette offre ne peut pas faire l’objet d’un abonnement payant.',
       );
     }
 
-    if (offer.price <= 0 || offer.billingPeriod !== OfferBillingPeriod.MONTHLY) {
-      throw new BadRequestException(
-        'Cette offre ne possède pas de tarif mensuel valide.',
-      );
-    }
-
-    const existingRequest = await this.subscriptionModel
-      .findOne({
-        restaurantId: restaurant._id,
-        status: {
-          $in: [
-            SubscriptionRequestStatus.PENDING_PAYMENT,
-            SubscriptionRequestStatus.PENDING_VERIFICATION,
-          ],
-        },
-      })
-      .exec();
+    const existingRequest = await this.subscriptionModel.findOne({
+      restaurantId: restaurant._id,
+      status: {
+        $in: [
+          SubscriptionRequestStatus.PENDING_PAYMENT,
+          SubscriptionRequestStatus.PENDING_VERIFICATION,
+        ],
+      },
+    });
 
     if (existingRequest) {
       throw new BadRequestException(
-        'Une demande de souscription est déjà en cours pour ce restaurant.',
+        'Une demande d’abonnement est déjà en cours.',
       );
     }
 
@@ -133,31 +118,25 @@ export class SubscriptionsService {
       paymentMethod: 'wave',
       paymentReference: '',
       status: SubscriptionRequestStatus.PENDING_PAYMENT,
-      startsAt: null,
-      expiresAt: null,
-      validatedBy: null,
-      validatedAt: null,
-      rejectionReason: '',
     });
 
     return {
-      message: 'Demande de souscription créée avec succès.',
-      data: subscription,
+      message: 'Demande d’abonnement créée.',
+      subscription,
     };
   }
 
   /**
-   * Le restaurateur signale qu'il a effectué son paiement.
+   * Déclaration du paiement Wave par le restaurateur.
+   * Le paiement sera ensuite vérifié manuellement par le Super Admin.
    */
   async submitPayment(
     subscriptionId: string,
-    restaurantId: string,
+    userId: string,
     paymentReference: string,
   ) {
     if (!Types.ObjectId.isValid(subscriptionId)) {
-      throw new BadRequestException(
-        'Identifiant de souscription invalide.',
-      );
+      throw new BadRequestException('Identifiant invalide.');
     }
 
     const reference = paymentReference?.trim();
@@ -168,30 +147,33 @@ export class SubscriptionsService {
       );
     }
 
-    const subscription = await this.subscriptionModel
-      .findById(subscriptionId)
-      .exec();
+    const subscription = await this.subscriptionModel.findById(
+      subscriptionId,
+    );
 
     if (!subscription) {
-      throw new NotFoundException(
-        'Souscription introuvable.',
-      );
+      throw new NotFoundException('Demande d’abonnement introuvable.');
     }
 
-    if (
-      subscription.restaurantId.toString() !== restaurantId
-    ) {
+    const restaurant = await this.restaurantModel.findById(
+      subscription.restaurantId,
+    );
+
+    if (!restaurant) {
+      throw new NotFoundException('Restaurant introuvable.');
+    }
+
+    if (restaurant.ownerId.toString() !== userId) {
       throw new ForbiddenException(
-        'Cette souscription ne vous appartient pas.',
+        'Vous ne pouvez pas modifier cette demande.',
       );
     }
 
     if (
-      subscription.status !==
-      SubscriptionRequestStatus.PENDING_PAYMENT
+      subscription.status !== SubscriptionRequestStatus.PENDING_PAYMENT
     ) {
       throw new BadRequestException(
-        'Cette souscription ne peut plus recevoir de paiement.',
+        'Cette demande ne peut plus recevoir de déclaration de paiement.',
       );
     }
 
@@ -202,63 +184,44 @@ export class SubscriptionsService {
     await subscription.save();
 
     return {
-      message: 'Paiement signalé. En attente de vérification.',
-      data: subscription,
+      message: 'Paiement déclaré. En attente de vérification.',
+      subscription,
     };
   }
 
   /**
-   * Liste des souscriptions réservée au Super Admin.
+   * Liste des demandes pour le tableau de bord Super Admin.
    */
   async findAllAdmin() {
-    const subscriptions = await this.subscriptionModel
+    return this.subscriptionModel
       .find()
-      .populate({
-        path: 'restaurantId',
-        select: 'name ownerName ownerEmail phone',
-      })
-      .populate({
-        path: 'validatedBy',
-        select: 'name email',
-      })
+      .populate('restaurantId')
+      .populate('validatedBy')
       .sort({ createdAt: -1 })
-      .lean()
       .exec();
-
-    return {
-      count: subscriptions.length,
-      data: subscriptions,
-    };
   }
 
   /**
-   * Validation manuelle du paiement par le Super Admin.
+   * Activation manuelle après vérification du paiement par le Super Admin.
    */
   async activate(
     subscriptionId: string,
     adminId: string,
     dto: ActivateSubscriptionDto,
   ) {
-    if (!Types.ObjectId.isValid(subscriptionId)) {
-      throw new BadRequestException(
-        'Identifiant de souscription invalide.',
-      );
+    if (
+      !Types.ObjectId.isValid(subscriptionId) ||
+      !Types.ObjectId.isValid(adminId)
+    ) {
+      throw new BadRequestException('Identifiant invalide.');
     }
 
-    if (!Types.ObjectId.isValid(adminId)) {
-      throw new BadRequestException(
-        'Identifiant administrateur invalide.',
-      );
-    }
-
-    const subscription = await this.subscriptionModel
-      .findById(subscriptionId)
-      .exec();
+    const subscription = await this.subscriptionModel.findById(
+      subscriptionId,
+    );
 
     if (!subscription) {
-      throw new NotFoundException(
-        'Souscription introuvable.',
-      );
+      throw new NotFoundException('Demande d’abonnement introuvable.');
     }
 
     if (
@@ -266,115 +229,92 @@ export class SubscriptionsService {
       SubscriptionRequestStatus.PENDING_VERIFICATION
     ) {
       throw new BadRequestException(
-        'Cette souscription est déjà traitée ou le paiement n’a pas été signalé.',
+        'Cette demande n’est pas en attente de vérification.',
       );
     }
 
     if (
-      !dto.paymentReference?.trim() ||
-      dto.paymentReference.trim() !== subscription.paymentReference
+      subscription.paymentReference !==
+      dto.paymentReference?.trim()
     ) {
       throw new BadRequestException(
         'La référence du paiement ne correspond pas.',
       );
     }
 
-    const restaurant = await this.restaurantModel
-      .findById(subscription.restaurantId)
-      .exec();
+    const restaurant = await this.restaurantModel.findById(
+      subscription.restaurantId,
+    );
 
     if (!restaurant) {
-      throw new NotFoundException(
-        'Restaurant introuvable.',
-      );
+      throw new NotFoundException('Restaurant introuvable.');
     }
 
-    const offer = await this.offerModel
-      .findById(subscription.offerId)
-      .exec();
-
-    if (!offer) {
-      throw new NotFoundException(
-        'Offre introuvable.',
-      );
-    }
-
-    if (offer.code !== subscription.offerCode) {
+    if (restaurant.status !== RestaurantStatus.APPROVED) {
       throw new BadRequestException(
-        'Le code de l’offre ne correspond plus à la souscription.',
+        'Le restaurant doit être approuvé pour activer un abonnement.',
       );
     }
 
-    if (offer.code === OfferCode.FREE) {
-      throw new BadRequestException(
-        'Une offre Free ne peut pas être activée comme abonnement payant.',
-      );
+    if (subscription.amount <= 0) {
+      throw new BadRequestException('Montant de l’abonnement invalide.');
     }
 
-    if (offer.price !== subscription.amount) {
-      throw new BadRequestException(
-        'Le tarif de l’offre a changé. Vérification manuelle nécessaire.',
-      );
+    const now = new Date();
+
+    // Si le restaurant possède déjà un abonnement payant actif,
+    // le renouvellement commence à la date de son expiration.
+    // Sinon, le nouvel abonnement commence immédiatement.
+    let startsAt = now;
+
+    if (
+      restaurant.subscriptionStatus === SubscriptionStatus.ACTIVE &&
+      restaurant.subscriptionExpiresAt &&
+      restaurant.subscriptionExpiresAt > now
+    ) {
+      startsAt = new Date(restaurant.subscriptionExpiresAt);
     }
 
-    const startsAt = new Date();
-    const expiresAt = new Date(startsAt);
-    expiresAt.setMonth(expiresAt.getMonth() + 1);
+    const expiresAt = this.addOneMonth(startsAt);
 
-    // Activation de l'offre dans le restaurant.
+    // Mise à jour du restaurant.
     restaurant.activeOffer = subscription.offerName;
     restaurant.subscriptionStatus = SubscriptionStatus.ACTIVE;
     restaurant.subscriptionExpiresAt = expiresAt;
 
     await restaurant.save();
 
-    // Enregistrement de la validation dans l'historique.
+    // Mise à jour de l'historique de l'abonnement.
     subscription.status = SubscriptionRequestStatus.ACTIVE;
     subscription.startsAt = startsAt;
     subscription.expiresAt = expiresAt;
     subscription.validatedBy = new Types.ObjectId(adminId);
-    subscription.validatedAt = startsAt;
+    subscription.validatedAt = now;
     subscription.rejectionReason = '';
 
     await subscription.save();
 
     return {
-      message: `Paiement validé. L'offre ${subscription.offerName} est maintenant active.`,
-      data: {
-        subscription,
-        restaurant: {
-          id: restaurant._id,
-          name: restaurant.name,
-          activeOffer: restaurant.activeOffer,
-          subscriptionStatus: restaurant.subscriptionStatus,
-          subscriptionExpiresAt:
-            restaurant.subscriptionExpiresAt,
-        },
-      },
+      message: 'Abonnement activé avec succès.',
+      restaurant,
+      subscription,
     };
   }
 
   /**
-   * Refus d'une souscription par le Super Admin.
+   * Rejet d'une demande après vérification.
    */
-  async reject(
-    subscriptionId: string,
-    reason: string,
-  ) {
+  async reject(subscriptionId: string, reason: string) {
     if (!Types.ObjectId.isValid(subscriptionId)) {
-      throw new BadRequestException(
-        'Identifiant de souscription invalide.',
-      );
+      throw new BadRequestException('Identifiant invalide.');
     }
 
-    const subscription = await this.subscriptionModel
-      .findById(subscriptionId)
-      .exec();
+    const subscription = await this.subscriptionModel.findById(
+      subscriptionId,
+    );
 
     if (!subscription) {
-      throw new NotFoundException(
-        'Souscription introuvable.',
-      );
+      throw new NotFoundException('Demande d’abonnement introuvable.');
     }
 
     if (
@@ -382,7 +322,7 @@ export class SubscriptionsService {
       SubscriptionRequestStatus.PENDING_VERIFICATION
     ) {
       throw new BadRequestException(
-        'Seules les demandes en attente de vérification peuvent être refusées.',
+        'Cette demande ne peut pas être rejetée.',
       );
     }
 
@@ -390,7 +330,7 @@ export class SubscriptionsService {
 
     if (!rejectionReason) {
       throw new BadRequestException(
-        'Le motif du refus est obligatoire.',
+        'Le motif du rejet est obligatoire.',
       );
     }
 
@@ -400,69 +340,55 @@ export class SubscriptionsService {
     await subscription.save();
 
     return {
-      message: 'La demande de souscription a été refusée.',
-      data: subscription,
+      message: 'Demande d’abonnement rejetée.',
+      subscription,
     };
   }
 
   /**
-   * Historique des souscriptions d'un restaurant.
+   * Historique des abonnements d'un restaurant.
    */
-  async findByRestaurant(
-    restaurantId: string,
-    userId: string,
-  ) {
+  async findByRestaurant(restaurantId: string, userId: string) {
     if (!Types.ObjectId.isValid(restaurantId)) {
-      throw new BadRequestException(
-        'Identifiant du restaurant invalide.',
-      );
+      throw new BadRequestException('Identifiant invalide.');
     }
 
-    const restaurant = await this.restaurantModel
-      .findById(restaurantId)
-      .exec();
+    const restaurant = await this.restaurantModel.findById(restaurantId);
 
     if (!restaurant) {
-      throw new NotFoundException(
-        'Restaurant introuvable.',
-      );
+      throw new NotFoundException('Restaurant introuvable.');
     }
 
     if (restaurant.ownerId.toString() !== userId) {
       throw new ForbiddenException(
-        'Vous ne pouvez consulter que vos propres souscriptions.',
+        'Vous ne pouvez pas consulter cet historique.',
       );
     }
 
-    const subscriptions = await this.subscriptionModel
+    return this.subscriptionModel
       .find({ restaurantId: restaurant._id })
       .sort({ createdAt: -1 })
-      .lean()
       .exec();
-
-    return {
-      count: subscriptions.length,
-      data: subscriptions,
-    };
   }
 
   /**
-   * Récupère le restaurant appartenant au restaurateur connecté.
+   * Ajoute un mois calendaire en évitant les débordements de fin de mois.
    */
-  async findRestaurantForOwner(userId: string) {
-    const restaurant = await this.restaurantModel
-      .findOne({
-        ownerId: new Types.ObjectId(userId),
-      })
-      .exec();
+  private addOneMonth(date: Date): Date {
+    const result = new Date(date);
+    const originalDay = result.getDate();
 
-    if (!restaurant) {
-      throw new NotFoundException(
-        'Aucun restaurant associé à ce compte.',
-      );
-    }
+    result.setDate(1);
+    result.setMonth(result.getMonth() + 1);
 
-    return restaurant;
+    const lastDayOfMonth = new Date(
+      result.getFullYear(),
+      result.getMonth() + 1,
+      0,
+    ).getDate();
+
+    result.setDate(Math.min(originalDay, lastDayOfMonth));
+
+    return result;
   }
-
 }
