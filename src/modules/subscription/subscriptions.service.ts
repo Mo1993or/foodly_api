@@ -43,18 +43,10 @@ export class SubscriptionsService {
     private readonly restaurantModel: Model<Restaurant>,
   ) {}
 
-  /**
-   * Création d'une demande d'abonnement.
-   *
-   * FREE :
-   * - Activation immédiate.
-   * - 10 jours d'essai.
-   * - Une seule utilisation par restaurant.
-   *
-   * Offres payantes :
-   * - Création d'une demande de paiement Wave.
-   * - Activation uniquement après validation du Super Admin.
-   */
+  // ==================================================
+  // CRÉER UNE DEMANDE D'ABONNEMENT
+  // ==================================================
+
   async createRequest(
     restaurantId: string,
     offerId: string,
@@ -93,9 +85,9 @@ export class SubscriptionsService {
 
     const now = new Date();
 
-    // --------------------------------------------------
+    // ==================================================
     // OFFRE FREE
-    // --------------------------------------------------
+    // ==================================================
 
     if (offer.code === OfferCode.FREE) {
       if (
@@ -107,7 +99,7 @@ export class SubscriptionsService {
         );
       }
 
-      // Vérification de l'existence d'un ancien essai.
+      // Un seul essai gratuit par restaurant.
       const existingTrial = await this.subscriptionModel.findOne({
         restaurantId: restaurant._id,
         offerCode: OfferCode.FREE,
@@ -120,8 +112,7 @@ export class SubscriptionsService {
         );
       }
 
-      // Une demande payante doit être traitée avant
-      // de pouvoir créer une autre demande.
+      // Vérifier qu'aucune autre demande n'est en cours.
       const pendingRequest = await this.subscriptionModel.findOne({
         restaurantId: restaurant._id,
         status: {
@@ -170,8 +161,7 @@ export class SubscriptionsService {
           message: 'Votre essai gratuit de 10 jours est activé.',
           subscription,
         };
-      } catch (error) {
-        // Protection supplémentaire contre les demandes simultanées.
+      } catch (error: any) {
         if (error?.code === 11000) {
           throw new ConflictException(
             'Ce restaurant a déjà utilisé son essai gratuit.',
@@ -182,9 +172,9 @@ export class SubscriptionsService {
       }
     }
 
-    // --------------------------------------------------
+    // ==================================================
     // OFFRES PAYANTES
-    // --------------------------------------------------
+    // ==================================================
 
     if (
       Number(offer.price) <= 0 ||
@@ -211,6 +201,7 @@ export class SubscriptionsService {
       );
     }
 
+    // Création de la demande de paiement.
     const subscription = await this.subscriptionModel.create({
       restaurantId: restaurant._id,
       offerId: offer._id,
@@ -228,6 +219,29 @@ export class SubscriptionsService {
       rejectionReason: '',
     });
 
+    try {
+      // IMPORTANT :
+      // Synchroniser immédiatement le restaurant,
+      // même si le paiement n'a pas encore été effectué.
+
+      restaurant.activeOffer = offer.code;
+      restaurant.subscriptionStatus =
+        SubscriptionStatus.PENDING_PAYMENT;
+
+      restaurant.trialStartedAt = null;
+      restaurant.trialEndsAt = null;
+      restaurant.subscriptionExpiresAt = null;
+
+      await restaurant.save();
+    } catch (error) {
+      // Supprimer la demande si la synchronisation échoue.
+      await this.subscriptionModel.findByIdAndDelete(
+        subscription._id,
+      );
+
+      throw error;
+    }
+
     return {
       message:
         'Demande créée. Effectuez le paiement Wave puis soumettez votre référence.',
@@ -235,9 +249,10 @@ export class SubscriptionsService {
     };
   }
 
-  /**
-   * Soumission de la référence de paiement Wave.
-   */
+  // ==================================================
+  // SOUMETTRE LE PAIEMENT WAVE
+  // ==================================================
+
   async submitPayment(
     subscriptionId: string,
     userId: string,
@@ -264,7 +279,9 @@ export class SubscriptionsService {
       await this.subscriptionModel.findById(subscriptionId);
 
     if (!subscription) {
-      throw new NotFoundException('Demande d’abonnement introuvable.');
+      throw new NotFoundException(
+        'Demande d’abonnement introuvable.',
+      );
     }
 
     if (
@@ -299,7 +316,6 @@ export class SubscriptionsService {
       );
     }
 
-    // Mise à jour conditionnelle pour éviter deux soumissions simultanées.
     const updatedSubscription =
       await this.subscriptionModel.findOneAndUpdate(
         {
@@ -323,6 +339,9 @@ export class SubscriptionsService {
       );
     }
 
+    // Le restaurant reste en attente de paiement
+    // jusqu'à la validation du Super Admin.
+
     return {
       message:
         'Référence envoyée. Votre paiement sera vérifié par le Super Admin.',
@@ -330,9 +349,10 @@ export class SubscriptionsService {
     };
   }
 
-  /**
-   * Liste de toutes les demandes pour le Super Admin.
-   */
+  // ==================================================
+  // TOUTES LES DEMANDES (SUPER ADMIN)
+  // ==================================================
+
   async findAllAdmin() {
     return this.subscriptionModel
       .find()
@@ -341,9 +361,10 @@ export class SubscriptionsService {
       .sort({ createdAt: -1 });
   }
 
-  /**
-   * Activation d'un abonnement payant par le Super Admin.
-   */
+  // ==================================================
+  // ACTIVER UN ABONNEMENT (SUPER ADMIN)
+  // ==================================================
+
   async activate(
     subscriptionId: string,
     adminId: string,
@@ -356,7 +377,9 @@ export class SubscriptionsService {
       await this.subscriptionModel.findById(subscriptionId);
 
     if (!subscription) {
-      throw new NotFoundException('Demande d’abonnement introuvable.');
+      throw new NotFoundException(
+        'Demande d’abonnement introuvable.',
+      );
     }
 
     if (
@@ -377,8 +400,11 @@ export class SubscriptionsService {
       );
     }
 
-    const expectedReference = subscription.paymentReference?.trim();
-    const submittedReference = dto.paymentReference?.trim();
+    const expectedReference =
+      subscription.paymentReference?.trim();
+
+    const submittedReference =
+      dto.paymentReference?.trim();
 
     if (!expectedReference) {
       throw new BadRequestException(
@@ -406,7 +432,9 @@ export class SubscriptionsService {
       );
     }
 
-    const offer = await this.offerModel.findById(subscription.offerId);
+    const offer = await this.offerModel.findById(
+      subscription.offerId,
+    );
 
     if (!offer || !offer.isActive) {
       throw new BadRequestException(
@@ -424,20 +452,17 @@ export class SubscriptionsService {
       );
     }
 
-    // Vérification de la cohérence entre la demande et l'offre actuelle.
     if (
       offer.code !== subscription.offerCode ||
       Number(offer.price) !== Number(subscription.amount)
     ) {
       throw new BadRequestException(
-        'Le prix ou le code de l’offre a changé depuis la demande. Vérification manuelle nécessaire.',
+        'Le prix ou le code de l’offre a changé depuis la demande.',
       );
     }
 
     const now = new Date();
 
-    // Si un abonnement payant est encore actif,
-    // le nouvel abonnement commence après son expiration.
     let startsAt = now;
 
     if (
@@ -450,11 +475,7 @@ export class SubscriptionsService {
 
     const expiresAt = this.addOneMonth(startsAt);
 
-    /*
-     * Verrouillage atomique de la demande.
-     * Deux administrateurs ne peuvent pas activer simultanément
-     * la même demande.
-     */
+    // Verrouillage atomique : une seule activation possible.
     const activatedSubscription =
       await this.subscriptionModel.findOneAndUpdate(
         {
@@ -487,13 +508,15 @@ export class SubscriptionsService {
     try {
       restaurant.activeOffer = offer.code;
       restaurant.subscriptionStatus = SubscriptionStatus.ACTIVE;
+
       restaurant.trialStartedAt = null;
       restaurant.trialEndsAt = null;
       restaurant.subscriptionExpiresAt = expiresAt;
 
       await restaurant.save();
     } catch (error) {
-      // Annulation de l'activation si la mise à jour du restaurant échoue.
+      // Rétablir la demande en attente si le restaurant
+      // n'a pas pu être mis à jour.
       await this.subscriptionModel.updateOne(
         {
           _id: subscriptionId,
@@ -520,10 +543,14 @@ export class SubscriptionsService {
     };
   }
 
-  /**
-   * Refus d'une demande par le Super Admin.
-   */
-  async reject(subscriptionId: string, reason: string) {
+  // ==================================================
+  // REFUSER UNE DEMANDE (SUPER ADMIN)
+  // ==================================================
+
+  async reject(
+    subscriptionId: string,
+    reason: string,
+  ) {
     this.validateObjectId(subscriptionId, 'Abonnement');
 
     const rejectionReason = reason?.trim();
@@ -538,7 +565,9 @@ export class SubscriptionsService {
       await this.subscriptionModel.findById(subscriptionId);
 
     if (!subscription) {
-      throw new NotFoundException('Demande d’abonnement introuvable.');
+      throw new NotFoundException(
+        'Demande d’abonnement introuvable.',
+      );
     }
 
     if (
@@ -573,15 +602,38 @@ export class SubscriptionsService {
       );
     }
 
+    // Synchronisation du restaurant après le refus.
+    const restaurant = await this.restaurantModel.findById(
+      rejectedSubscription.restaurantId,
+    );
+
+    if (
+      restaurant &&
+      restaurant.subscriptionStatus ===
+        SubscriptionStatus.PENDING_PAYMENT &&
+      restaurant.activeOffer === rejectedSubscription.offerCode
+    ) {
+      restaurant.activeOffer = '';
+      restaurant.subscriptionStatus =
+        SubscriptionStatus.NOT_STARTED;
+
+      restaurant.trialStartedAt = null;
+      restaurant.trialEndsAt = null;
+      restaurant.subscriptionExpiresAt = null;
+
+      await restaurant.save();
+    }
+
     return {
       message: 'Demande d’abonnement refusée.',
       subscription: rejectedSubscription,
     };
   }
 
-  /**
-   * Historique des abonnements d'un restaurant.
-   */
+  // ==================================================
+  // HISTORIQUE D'UN RESTAURANT
+  // ==================================================
+
   async findByRestaurant(
     restaurantId: string,
     userId: string,
@@ -589,7 +641,9 @@ export class SubscriptionsService {
     this.validateObjectId(restaurantId, 'Restaurant');
     this.validateObjectId(userId, 'Utilisateur');
 
-    const restaurant = await this.restaurantModel.findById(restaurantId);
+    const restaurant = await this.restaurantModel.findById(
+      restaurantId,
+    );
 
     if (!restaurant) {
       throw new NotFoundException('Restaurant introuvable.');
@@ -607,11 +661,14 @@ export class SubscriptionsService {
       .sort({ createdAt: -1 });
   }
 
-  // --------------------------------------------------
+  // ==================================================
   // HELPERS
-  // --------------------------------------------------
+  // ==================================================
 
-  private validateObjectId(value: string, label: string) {
+  private validateObjectId(
+    value: string,
+    label: string,
+  ) {
     if (!Types.ObjectId.isValid(value)) {
       throw new BadRequestException(`${label} invalide.`);
     }
@@ -636,7 +693,9 @@ export class SubscriptionsService {
       0,
     ).getDate();
 
-    result.setDate(Math.min(originalDay, lastDayOfMonth));
+    result.setDate(
+      Math.min(originalDay, lastDayOfMonth),
+    );
 
     return result;
   }
