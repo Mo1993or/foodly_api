@@ -34,7 +34,11 @@ export class SubscriptionsController {
   ) {}
 
   /**
-   * Restaurateur : créer une demande d'abonnement.
+   * Restaurateur :
+   * Choisir une offre et créer une demande d'abonnement.
+   *
+   * FREE : activation immédiate de l'essai de 10 jours.
+   * STARTER / PRO / PREMIUM : demande de paiement Wave.
    */
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,7 +55,8 @@ export class SubscriptionsController {
   }
 
   /**
-   * Restaurateur : déclarer son paiement Wave.
+   * Restaurateur :
+   * Déclarer son paiement Wave.
    */
   @Patch(':id/payment')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -69,7 +74,8 @@ export class SubscriptionsController {
   }
 
   /**
-   * Restaurateur : consulter l'historique de son restaurant.
+   * Restaurateur :
+   * Consulter l'historique des abonnements de son restaurant.
    */
   @Get('my/:restaurantId')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -85,7 +91,8 @@ export class SubscriptionsController {
   }
 
   /**
-   * Super Admin : consulter toutes les demandes.
+   * Super Admin :
+   * Consulter toutes les demandes d'abonnement.
    */
   @Get('admin/all')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -95,7 +102,8 @@ export class SubscriptionsController {
   }
 
   /**
-   * Super Admin : activer un abonnement après vérification du paiement.
+   * Super Admin :
+   * Activer un abonnement après vérification du paiement.
    */
   @Patch('admin/:id/activate')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -113,7 +121,8 @@ export class SubscriptionsController {
   }
 
   /**
-   * Super Admin : rejeter une demande.
+   * Super Admin :
+   * Rejeter une demande après vérification.
    */
   @Patch('admin/:id/reject')
   @UseGuards(JwtAuthGuard, RolesGuard)

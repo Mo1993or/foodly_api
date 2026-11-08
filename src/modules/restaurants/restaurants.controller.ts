@@ -32,14 +32,22 @@ export class RestaurantsController {
     private readonly restaurantsService: RestaurantsService,
   ) {}
 
-  // Inscription publique
+  /**
+   * Inscription publique d'un restaurateur.
+   * Le restaurant est automatiquement approuvé.
+   * Aucun abonnement n'est activé à cette étape.
+   */
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  registerRestaurant(@Body() dto: RegisterRestaurantDto) {
+  registerRestaurant(
+    @Body() dto: RegisterRestaurantDto,
+  ) {
     return this.restaurantsService.registerRestaurant(dto);
   }
 
-  // Liste publique avec filtres
+  /**
+   * Liste publique des restaurants approuvés.
+   */
   @Get()
   findPublicRestaurants(
     @Query('category') category?: string,
@@ -51,7 +59,9 @@ export class RestaurantsController {
     );
   }
 
-  // Routes administratives protégées
+  /**
+   * Liste administrative des anciennes demandes en attente.
+   */
   @Get('pending')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
@@ -59,6 +69,10 @@ export class RestaurantsController {
     return this.restaurantsService.findPending();
   }
 
+  /**
+   * Approbation administrative d'un ancien restaurant en attente.
+   * Cette action ne déclenche aucun essai gratuit.
+   */
   @Patch(':id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
@@ -72,6 +86,9 @@ export class RestaurantsController {
     );
   }
 
+  /**
+   * Refus administratif d'une ancienne demande.
+   */
   @Patch(':id/reject')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
@@ -86,24 +103,33 @@ export class RestaurantsController {
       dto.reviewNote,
     );
   }
+
+  /**
+   * Modification de l'état ouvert/fermé.
+   * Réservée au restaurateur connecté.
+   */
   @Patch(':id/open-status')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.RESTAURATEUR)
-updateOpenStatus(
-  @Param('id') id: string,
-  @Body('isOpen') isOpen: boolean,
-  @Req() request: AuthenticatedRequest,
-) {
-  return this.restaurantsService.updateOpenStatus(
-    id,
-    request.user.sub,
-    isOpen,
-  );
-}
-@Get('types')
-findRestaurantTypes() {
-  return {
-    data: this.restaurantsService.findRestaurantTypes(),
-  };
-}
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURATEUR)
+  updateOpenStatus(
+    @Param('id') id: string,
+    @Body('isOpen') isOpen: boolean,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.restaurantsService.updateOpenStatus(
+      id,
+      request.user.sub,
+      isOpen,
+    );
+  }
+
+  /**
+   * Liste des types de restaurants disponibles.
+   */
+  @Get('types')
+  findRestaurantTypes() {
+    return {
+      data: this.restaurantsService.findRestaurantTypes(),
+    };
+  }
 }

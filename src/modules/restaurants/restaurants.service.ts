@@ -29,6 +29,13 @@ export class RestaurantsService {
     private readonly usersService: UsersService,
   ) {}
 
+  /**
+   * Création automatique d'un compte restaurateur
+   * et de son restaurant.
+   *
+   * Le restaurant est immédiatement approuvé.
+   * Aucun abonnement ou essai gratuit n'est activé ici.
+   */
   async registerRestaurant(dto: RegisterRestaurantDto) {
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
@@ -50,14 +57,20 @@ export class RestaurantsService {
       colors: dto.colors ?? [],
       latitude: dto.latitude,
       longitude: dto.longitude,
+
       ownerName: dto.ownerName.trim(),
       ownerEmail: dto.email.trim().toLowerCase(),
       ownerId: user._id,
       commercialPhone: dto.commercialPhone,
+
+      // Approbation automatique
       status: RestaurantStatus.APPROVED,
+      reviewedBy: null,
       reviewNote: '',
+
       isOpen: false,
 
+      // Aucun abonnement à la création
       activeOffer: '',
       subscriptionStatus: SubscriptionStatus.NOT_STARTED,
       trialStartedAt: null,
@@ -67,7 +80,7 @@ export class RestaurantsService {
 
     return {
       message:
-        'Inscription réussie. Votre restaurant est en attente de validation.',
+        'Compte créé et restaurant approuvé avec succès. Vous pouvez maintenant choisir votre offre.',
       data: {
         owner: user,
         restaurant,
@@ -75,6 +88,9 @@ export class RestaurantsService {
     };
   }
 
+  /**
+   * Récupération de tous les restaurants.
+   */
   async findAll() {
     return this.restaurantModel
       .find()
@@ -82,6 +98,10 @@ export class RestaurantsService {
       .exec();
   }
 
+  /**
+   * Récupération des restaurants encore en attente.
+   * Principalement pour les anciennes demandes.
+   */
   async findPending() {
     return this.restaurantModel
       .find({ status: RestaurantStatus.PENDING })
@@ -89,6 +109,14 @@ export class RestaurantsService {
       .exec();
   }
 
+  /**
+   * Approbation manuelle d'un ancien restaurant en attente.
+   *
+   * IMPORTANT :
+   * L'approbation ne déclenche plus l'essai gratuit.
+   * Le restaurateur doit choisir FREE pour démarrer
+   * son essai de 10 jours.
+   */
   async approveRestaurant(
     restaurantId: string,
     reviewerId: string,
@@ -101,32 +129,35 @@ export class RestaurantsService {
       );
     }
 
-    // Début de l'essai gratuit au moment de l'approbation.
-    const trialStartedAt = new Date();
-
-    // Durée de l'essai : 10 jours.
-    const trialEndsAt = new Date(
-      trialStartedAt.getTime() + 10 * 24 * 60 * 60 * 1000,
-    );
+    if (!Types.ObjectId.isValid(reviewerId)) {
+      throw new BadRequestException(
+        'Identifiant de l’administrateur invalide.',
+      );
+    }
 
     restaurant.status = RestaurantStatus.APPROVED;
     restaurant.reviewedBy = new Types.ObjectId(reviewerId);
     restaurant.reviewNote = '';
 
-    restaurant.activeOffer = 'Free';
-    restaurant.subscriptionStatus = SubscriptionStatus.TRIAL;
-    restaurant.trialStartedAt = trialStartedAt;
-    restaurant.trialEndsAt = trialEndsAt;
+    // Aucun abonnement n'est activé pendant l'approbation.
+    restaurant.activeOffer = '';
+    restaurant.subscriptionStatus = SubscriptionStatus.NOT_STARTED;
+    restaurant.trialStartedAt = null;
+    restaurant.trialEndsAt = null;
     restaurant.subscriptionExpiresAt = null;
 
     await restaurant.save();
 
     return {
-      message: 'Restaurant approuvé. Essai gratuit de 10 jours activé.',
+      message:
+        'Restaurant approuvé. Vous pouvez maintenant choisir une offre.',
       data: restaurant,
     };
   }
 
+  /**
+   * Refus d'un ancien restaurant en attente.
+   */
   async rejectRestaurant(
     restaurantId: string,
     reviewerId: string,
@@ -137,6 +168,12 @@ export class RestaurantsService {
     if (restaurant.status !== RestaurantStatus.PENDING) {
       throw new BadRequestException(
         'Seuls les restaurants en attente peuvent être refusés.',
+      );
+    }
+
+    if (!Types.ObjectId.isValid(reviewerId)) {
+      throw new BadRequestException(
+        'Identifiant de l’administrateur invalide.',
       );
     }
 
@@ -152,6 +189,9 @@ export class RestaurantsService {
     };
   }
 
+  /**
+   * Recherche d'un restaurant par son identifiant.
+   */
   private async findRestaurantById(
     restaurantId: string,
   ): Promise<RestaurantDocument> {
@@ -172,6 +212,9 @@ export class RestaurantsService {
     return restaurant;
   }
 
+  /**
+   * Liste publique des restaurants approuvés.
+   */
   async findPublicRestaurants(
     category?: string,
     search?: string,
@@ -182,14 +225,18 @@ export class RestaurantsService {
 
     if (category?.trim()) {
       filter.restaurantType = {
-        $regex: `^${category.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+        $regex: `^${category
+          .trim()
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
         $options: 'i',
       };
     }
 
     if (search?.trim()) {
       filter.name = {
-        $regex: search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        $regex: search
+          .trim()
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
         $options: 'i',
       };
     }
@@ -201,6 +248,9 @@ export class RestaurantsService {
       .exec();
   }
 
+  /**
+   * Modification de l'état ouvert/fermé du restaurant.
+   */
   async updateOpenStatus(
     restaurantId: string,
     ownerId: string,
@@ -237,6 +287,9 @@ export class RestaurantsService {
     };
   }
 
+  /**
+   * Types de restaurants disponibles.
+   */
   findRestaurantTypes() {
     return [
       'Tout',

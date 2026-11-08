@@ -156,10 +156,11 @@ export class Restaurant {
   @Prop({ type: Boolean, default: false })
   isOpen: boolean;
 
-  // Offre actuellement active
+  // Aucune offre tant que le restaurateur n'en a pas choisi une
   @Prop({
     type: String,
-    default: 'Free',
+    default: '',
+    trim: true,
   })
   activeOffer: string;
 

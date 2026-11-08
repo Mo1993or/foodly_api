@@ -17,6 +17,7 @@ export enum SubscriptionRequestStatus {
 }
 
 export enum SubscriptionPaymentMethod {
+  NONE = 'none',
   WAVE = 'wave',
 }
 
@@ -60,6 +61,12 @@ export class Subscription {
     min: 0,
   })
   amount: number;
+
+  @Prop({
+    type: Boolean,
+    default: false,
+  })
+  isTrial: boolean;
 
   @Prop({
     type: String,
@@ -121,7 +128,23 @@ export class Subscription {
 export const SubscriptionSchema =
   SchemaFactory.createForClass(Subscription);
 
+// Historique d'un restaurant.
 SubscriptionSchema.index({
   restaurantId: 1,
   createdAt: -1,
 });
+
+// Un seul essai gratuit par restaurant, définitivement.
+SubscriptionSchema.index(
+  {
+    restaurantId: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      offerCode: OfferCode.FREE,
+      isTrial: true,
+    },
+    name: 'unique_free_trial_per_restaurant',
+  },
+);
