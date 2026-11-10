@@ -19,20 +19,43 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from '../users/shemas/user.shema';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
-@Controller("orders")
+@Controller('orders')
 export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
   ) {}
 
-  // Créer une commande : accessible sans compte client.
-  @Post('orders')
+  /**
+   * Créer une commande.
+   * Accessible sans compte client.
+   * Route : POST /api/v1/orders
+   */
+  @Post()
   create(@Body() dto: CreateOrderDto) {
     return this.ordersService.create(dto);
   }
 
-  // Liste des commandes d'un restaurant.
-  // Accessible uniquement à son restaurateur.
+  /**
+   * Tableau de bord du restaurateur.
+   * Route : GET /api/v1/orders/restaurant/:restaurantId/dashboard
+   */
+  @Get('restaurant/:restaurantId/dashboard')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURATEUR)
+  getRestaurantDashboard(
+    @Param('restaurantId') restaurantId: string,
+    @Req() request: any,
+  ) {
+    return this.ordersService.getRestaurantDashboard(
+      restaurantId,
+      request.user.sub,
+    );
+  }
+
+  /**
+   * Liste des commandes d'un restaurant.
+   * Accessible uniquement à son restaurateur.
+   */
   @Get('restaurant/:restaurantId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURATEUR)
@@ -46,9 +69,10 @@ export class OrdersController {
     );
   }
 
-  // Détail d'une commande.
-  // Le service vérifie que le restaurateur en est propriétaire.
-  @Get('/:id')
+  /**
+   * Détail d'une commande.
+   */
+  @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.RESTAURATEUR)
   findOne(
@@ -59,19 +83,23 @@ export class OrdersController {
       id,
       request.user.sub,
     );
-  };
-    @Patch(':id/status')
-    @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.RESTAURATEUR)
-    updateStatus(
+  }
+
+  /**
+   * Mise à jour du statut d'une commande.
+   */
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURATEUR)
+  updateStatus(
     @Param('id') id: string,
     @Req() request: any,
     @Body() dto: UpdateOrderStatusDto,
-    ) {
+  ) {
     return this.ordersService.updateStatus(
-        id,
-        request.user.sub,
-        dto.status,
+      id,
+      request.user.sub,
+      dto.status,
     );
-    }
+  }
 }

@@ -69,10 +69,7 @@ export class OrdersService {
         );
       }
 
-      if (
-        !Number.isInteger(item.quantity) ||
-        item.quantity <= 0
-      ) {
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
         throw new BadRequestException(
           'La quantité doit être un entier supérieur à zéro.',
         );
@@ -104,9 +101,7 @@ export class OrdersService {
     const restaurants = await this.restaurantModel
       .find({
         _id: {
-          $in: restaurantIds.map(
-            (id) => new Types.ObjectId(id),
-          ),
+          $in: restaurantIds.map((id) => new Types.ObjectId(id)),
         },
       })
       .exec();
@@ -124,14 +119,11 @@ export class OrdersService {
       ]),
     );
 
-    // Vérifier chaque restaurant avant de créer les commandes.
     for (const restaurantId of restaurantIds) {
       const restaurant = restaurantMap.get(restaurantId);
 
       if (!restaurant) {
-        throw new NotFoundException(
-          'Restaurant introuvable.',
-        );
+        throw new NotFoundException('Restaurant introuvable.');
       }
 
       if (restaurant.status !== RestaurantStatus.APPROVED) {
@@ -152,9 +144,7 @@ export class OrdersService {
     const products = await this.productModel
       .find({
         _id: {
-          $in: productIds.map(
-            (id) => new Types.ObjectId(id),
-          ),
+          $in: productIds.map((id) => new Types.ObjectId(id)),
         },
         isAvailable: true,
       })
@@ -182,9 +172,7 @@ export class OrdersService {
         );
       }
 
-      if (
-        product.restaurantId.toString() !== item.restaurantId
-      ) {
+      if (product.restaurantId.toString() !== item.restaurantId) {
         throw new BadRequestException(
           `Le produit ${product.name} n'appartient pas au restaurant indiqué.`,
         );
@@ -250,9 +238,7 @@ export class OrdersService {
   ): Promise<void> {
     const now = new Date();
 
-    if (
-      restaurant.subscriptionStatus === SubscriptionStatus.TRIAL
-    ) {
+    if (restaurant.subscriptionStatus === SubscriptionStatus.TRIAL) {
       if (
         restaurant.trialEndsAt &&
         new Date(restaurant.trialEndsAt) > now
@@ -268,9 +254,7 @@ export class OrdersService {
       );
     }
 
-    if (
-      restaurant.subscriptionStatus === SubscriptionStatus.ACTIVE
-    ) {
+    if (restaurant.subscriptionStatus === SubscriptionStatus.ACTIVE) {
       if (
         restaurant.subscriptionExpiresAt &&
         new Date(restaurant.subscriptionExpiresAt) > now
@@ -289,6 +273,192 @@ export class OrdersService {
     throw new ForbiddenException(
       `Le restaurant ${restaurant.name} ne dispose pas d'un abonnement actif pour recevoir de nouvelles commandes.`,
     );
+  }
+
+  /**
+   * Tableau de bord du restaurateur.
+   * Les données sont calculées uniquement pour son restaurant.
+   */
+  async getRestaurantDashboard(
+    restaurantId: string,
+    userId: string,
+  ) {
+    await this.findOwnedRestaurant(restaurantId, userId);
+
+    const restaurantObjectId = new Types.ObjectId(restaurantId);
+
+    const restaurantFilter = {
+      restaurantId: restaurantObjectId,
+    };
+
+    const activeStatuses = [
+      OrderStatus.CONFIRMED,
+      OrderStatus.PREPARING,
+      OrderStatus.READY,
+    ];
+
+    // Les 7 jours calendaires, aujourd'hui inclus.
+    // Le Sénégal étant en UTC+0, les dates UTC correspondent à Dakar.
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    const firstDay = new Date(today);
+    firstDay.setUTCDate(firstDay.getUTCDate() - 6);
+
+    const [
+      totalOrders,
+      pendingOrders,
+      activeOrders,
+      completedOrders,
+      revenueResult,
+      averageResult,
+      weeklyResult,
+      recentOrders,
+    ] = await Promise.all([
+      this.orderModel.countDocuments(restaurantFilter).exec(),
+
+      this.orderModel
+        .countDocuments({
+          ...restaurantFilter,
+          status: OrderStatus.PENDING,
+        })
+        .exec(),
+
+      this.orderModel
+        .countDocuments({
+          ...restaurantFilter,
+          status: { $in: activeStatuses },
+        })
+        .exec(),
+
+      this.orderModel
+        .countDocuments({
+          ...restaurantFilter,
+          status: OrderStatus.DELIVERED,
+        })
+        .exec(),
+
+      // Chiffre d'affaires : uniquement les commandes livrées.
+      this.orderModel.aggregate([
+        {
+          $match: {
+            ...restaurantFilter,
+            status: OrderStatus.DELIVERED,
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$total' },
+          },
+        },
+      ]),
+
+      // Panier moyen : toutes les commandes non annulées.
+      this.orderModel.aggregate([
+        {
+          $match: {
+            ...restaurantFilter,
+            status: { $ne: OrderStatus.CANCELLED },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            averageBasket: { $avg: '$total' },
+          },
+        },
+      ]),
+
+      // Revenus journaliers des 7 derniers jours.
+      this.orderModel.aggregate([
+        {
+          $match: {
+            ...restaurantFilter,
+            status: OrderStatus.DELIVERED,
+            createdAt: { $gte: firstDay },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: '$createdAt',
+                timezone: 'Africa/Dakar',
+              },
+            },
+            revenue: { $sum: '$total' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+
+      // Les 4 commandes les plus récentes.
+      this.orderModel
+        .find(restaurantFilter)
+        .sort({ createdAt: -1 })
+        .limit(4)
+        .select(
+          '_id customer.name customer.phone total status createdAt',
+        )
+        .lean()
+        .exec(),
+    ]);
+
+    const totalRevenue = revenueResult[0]?.totalRevenue ?? 0;
+    const averageBasket = averageResult[0]?.averageBasket ?? 0;
+
+    const weeklyRevenueMap = new Map<string, number>(
+      weeklyResult.map((item: { _id: string; revenue: number }) => [
+        item._id,
+        item.revenue,
+      ]),
+    );
+
+    const dayLabels = [
+      'Dim',
+      'Lun',
+      'Mar',
+      'Mer',
+      'Jeu',
+      'Ven',
+      'Sam',
+    ];
+
+    const weeklyRevenue = [];
+
+    for (let index = 0; index < 7; index++) {
+      const date = new Date(firstDay);
+      date.setUTCDate(firstDay.getUTCDate() + index);
+
+      const dateKey = date.toISOString().slice(0, 10);
+
+      weeklyRevenue.push({
+        date: dateKey,
+        day: dayLabels[date.getUTCDay()],
+        revenue: weeklyRevenueMap.get(dateKey) ?? 0,
+      });
+    }
+
+    return {
+      success: true,
+      data: {
+        totalOrders,
+        pendingOrders,
+        activeOrders,
+        completedOrders,
+        totalRevenue,
+        averageBasket: Math.round(averageBasket),
+        weeklyRevenue,
+        orderDistribution: {
+          pending: pendingOrders,
+          active: activeOrders,
+          completed: completedOrders,
+        },
+        recentOrders,
+      },
+    };
   }
 
   /**
@@ -327,9 +497,7 @@ export class OrdersService {
       );
     }
 
-    const order = await this.orderModel
-      .findById(orderId)
-      .exec();
+    const order = await this.orderModel.findById(orderId).exec();
 
     if (!order) {
       throw new NotFoundException('Commande introuvable.');
@@ -390,14 +558,10 @@ export class OrdersService {
       );
     }
 
-    const order = await this.orderModel
-      .findById(orderId)
-      .exec();
+    const order = await this.orderModel.findById(orderId).exec();
 
     if (!order) {
-      throw new NotFoundException(
-        'Commande introuvable.',
-      );
+      throw new NotFoundException('Commande introuvable.');
     }
 
     await this.findOwnedRestaurant(
@@ -405,10 +569,7 @@ export class OrdersService {
       userId,
     );
 
-    const allowedTransitions: Record<
-      OrderStatus,
-      OrderStatus[]
-    > = {
+    const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
       [OrderStatus.PENDING]: [
         OrderStatus.CONFIRMED,
         OrderStatus.CANCELLED,
@@ -417,12 +578,8 @@ export class OrdersService {
         OrderStatus.PREPARING,
         OrderStatus.CANCELLED,
       ],
-      [OrderStatus.PREPARING]: [
-        OrderStatus.READY,
-      ],
-      [OrderStatus.READY]: [
-        OrderStatus.DELIVERED,
-      ],
+      [OrderStatus.PREPARING]: [OrderStatus.READY],
+      [OrderStatus.READY]: [OrderStatus.DELIVERED],
       [OrderStatus.DELIVERED]: [],
       [OrderStatus.CANCELLED]: [],
     };
