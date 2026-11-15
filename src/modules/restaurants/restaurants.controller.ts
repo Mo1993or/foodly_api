@@ -122,6 +122,30 @@ export class RestaurantsController {
       isOpen,
     );
   }
+  /**
+   * Modification du restaurant.
+   * Réservée au restaurateur connecté.
+   */
+  @Patch(':id/update')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.RESTAURATEUR)
+  updateRestaurant(
+    @Param('id') id: string,
+    @Body('restaurantName') restaurantName: string,
+    @Body('description') description: string,
+    @Body('address') address: string,
+    @Body('phone') phone: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.restaurantsService.updateRestaurant(
+      id,
+      request.user.sub,
+      restaurantName,
+      description,
+      address,
+      phone
+    );
+  }
 
   /**
    * Liste des types de restaurants disponibles.

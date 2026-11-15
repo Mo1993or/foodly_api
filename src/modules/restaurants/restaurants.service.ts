@@ -286,7 +286,45 @@ export class RestaurantsService {
       data: restaurant,
     };
   }
+   /**
+   * Modification de l'état ouvert/fermé du restaurant.
+   */
+  async updateRestaurant(
+    restaurantId: string,
+    ownerId: string,
+    restaurantName: string,
+    description: string,
+    address: string,
+    phone: string,
+  ) {
+    
 
+    var restaurant = await this.findRestaurantById(restaurantId);
+
+    if (restaurant.ownerId.toString() !== ownerId) {
+      throw new BadRequestException(
+        'Vous ne pouvez modifier que votre propre restaurant.',
+      );
+    }
+
+    if (restaurant.status !== RestaurantStatus.APPROVED) {
+      throw new BadRequestException(
+        'Le restaurant doit être approuvé avant de modifier son état.',
+      );
+    }
+
+      restaurant.name = restaurantName;
+      restaurant.description = description;
+      restaurant.address = address;
+      restaurant.phone = phone;
+
+    await restaurant.save();
+
+    return {
+      message: 'Les données du restaurant sont maintenant mis à jour',
+      data: restaurant,
+    };
+  }
   /**
    * Types de restaurants disponibles.
    */
