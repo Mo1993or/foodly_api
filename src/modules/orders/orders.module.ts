@@ -21,10 +21,12 @@ import {
 } from '../restaurants/schemas/restaurant.schema';
 
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     AuthModule,
+    NotificationsModule,
 
     MongooseModule.forFeature([
       {

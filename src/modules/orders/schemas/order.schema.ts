@@ -81,6 +81,15 @@ export class Order {
   })
   customer: OrderCustomer;
 
+  // Token Firebase du client pour le suivi de cette commande
+  @Prop({
+    type: String,
+    trim: true,
+    maxlength: 4096,
+    default: null,
+  })
+  customerFcmToken: string | null;
+
   @Prop({
     type: [OrderItemSchema],
     required: true,
@@ -119,7 +128,6 @@ export class Order {
 
   @Prop({ trim: true, maxlength: 500, default: '' })
   note: string;
-
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

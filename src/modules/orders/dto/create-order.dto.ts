@@ -61,4 +61,10 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(500)
   note?: string;
+
+  // Token Firebase du client pour les notifications de suivi
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  customerFcmToken?: string;
 }

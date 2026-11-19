@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 
@@ -30,9 +31,12 @@ import {
 } from '../restaurants/schemas/restaurant.schema';
 
 import { CreateOrderDto } from './dto/create-order.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectModel(Order.name)
     private readonly orderModel: Model<OrderDocument>,
@@ -42,6 +46,8 @@ export class OrdersService {
 
     @InjectModel(Restaurant.name)
     private readonly restaurantModel: Model<RestaurantDocument>,
+
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -203,11 +209,17 @@ export class OrdersService {
 
       ordersToCreate.push({
         restaurantId: restaurant._id,
+
         customer: {
           name: dto.customer.name.trim(),
           phone: dto.customer.phone.trim(),
           address: dto.customer.address.trim(),
         },
+
+        // Token FCM du client associé à chaque commande créée
+        customerFcmToken:
+          dto.customerFcmToken?.trim() || null,
+
         items: orderItems,
         total,
         note: dto.note?.trim() ?? '',
@@ -218,15 +230,48 @@ export class OrdersService {
     }
 
     const createdOrders = await this.orderModel.insertMany(
-      ordersToCreate,
-      { ordered: true },
-    );
+  ordersToCreate,
+  { ordered: true },
+);
 
-    return {
-      message: `${createdOrders.length} commande(s) enregistrée(s) avec succès.`,
-      count: createdOrders.length,
-      data: createdOrders,
-    };
+// Notifications des restaurateurs concernés.
+// Chaque commande appartient à un seul restaurant.
+for (const order of createdOrders) {
+  const restaurant = restaurantMap.get(
+    order.restaurantId.toString(),
+  );
+
+  if (!restaurant) {
+    continue;
+  }
+
+  try {
+    await this.notificationsService.sendToUser(
+      restaurant.ownerId.toString(),
+      'Nouvelle commande reçue',
+      `Vous avez reçu une nouvelle commande de ${order.total} FCFA.`,
+      {
+        type: 'NEW_ORDER',
+        orderId: order._id.toString(),
+        restaurantId: restaurant._id.toString(),
+        total: order.total.toString(),
+        status: OrderStatus.PENDING,
+      },
+    );
+  } catch (error) {
+    this.logger.warn(
+      `La commande ${order._id} a été enregistrée, mais la notification du restaurateur n'a pas pu être envoyée : ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+return {
+  message: `${createdOrders.length} commande(s) enregistrée(s) avec succès.`,
+  count: createdOrders.length,
+  data: createdOrders,
+};
   }
 
   /**
@@ -297,8 +342,6 @@ export class OrdersService {
       OrderStatus.READY,
     ];
 
-    // Les 7 jours calendaires, aujourd'hui inclus.
-    // Le Sénégal étant en UTC+0, les dates UTC correspondent à Dakar.
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
 
@@ -338,7 +381,6 @@ export class OrdersService {
         })
         .exec(),
 
-      // Chiffre d'affaires : uniquement les commandes livrées.
       this.orderModel.aggregate([
         {
           $match: {
@@ -354,7 +396,6 @@ export class OrdersService {
         },
       ]),
 
-      // Panier moyen : toutes les commandes non annulées.
       this.orderModel.aggregate([
         {
           $match: {
@@ -370,7 +411,6 @@ export class OrdersService {
         },
       ]),
 
-      // Revenus journaliers des 7 derniers jours.
       this.orderModel.aggregate([
         {
           $match: {
@@ -394,7 +434,6 @@ export class OrdersService {
         { $sort: { _id: 1 } },
       ]),
 
-      // Les 4 commandes les plus récentes.
       this.orderModel
         .find(restaurantFilter)
         .sort({ createdAt: -1 })
@@ -544,6 +583,52 @@ export class OrdersService {
   }
 
   /**
+   * Construit le contenu de la notification selon le statut.
+   */
+  private getStatusNotification(status: OrderStatus): {
+    title: string;
+    body: string;
+  } {
+    switch (status) {
+      case OrderStatus.CONFIRMED:
+        return {
+          title: 'Commande confirmée',
+          body: 'Votre commande a été confirmée par le restaurant.',
+        };
+
+      case OrderStatus.PREPARING:
+        return {
+          title: 'Commande en préparation',
+          body: 'Le restaurant prépare actuellement votre commande.',
+        };
+
+      case OrderStatus.READY:
+        return {
+          title: 'Commande prête',
+          body: 'Votre commande est prête.',
+        };
+
+      case OrderStatus.DELIVERED:
+        return {
+          title: 'Commande livrée',
+          body: 'Votre commande a été livrée. Bon appétit !',
+        };
+
+      case OrderStatus.CANCELLED:
+        return {
+          title: 'Commande annulée',
+          body: 'Votre commande a été annulée par le restaurant.',
+        };
+
+      default:
+        return {
+          title: 'Mise à jour de votre commande',
+          body: 'Le statut de votre commande a été mis à jour.',
+        };
+    }
+  }
+
+  /**
    * Mise à jour du statut d'une commande.
    * Reste autorisée même après expiration.
    */
@@ -592,7 +677,33 @@ export class OrdersService {
 
     order.status = newStatus;
 
+    // La commande est d'abord enregistrée en base.
     await order.save();
+
+    // La notification est envoyée après l'enregistrement.
+    // Une erreur Firebase ne doit jamais annuler la mise à jour.
+    if (order.customerFcmToken) {
+      const notification = this.getStatusNotification(newStatus);
+
+      try {
+        await this.notificationsService.sendToToken(
+          order.customerFcmToken,
+          notification.title,
+          notification.body,
+          {
+            type: 'ORDER_STATUS_UPDATE',
+            orderId: order._id.toString(),
+            status: newStatus,
+          },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `La commande ${order._id} a été mise à jour, mais la notification client n'a pas pu être envoyée : ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
 
     return {
       message: 'Statut de la commande mis à jour avec succès.',
