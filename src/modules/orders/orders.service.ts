@@ -259,7 +259,7 @@ for (const order of createdOrders) {
       },
     );
   } catch (error) {
-    this.logger.warn(
+    console.log(
       `La commande ${order._id} a été enregistrée, mais la notification du restaurateur n'a pas pu être envoyée : ${
         error instanceof Error ? error.message : String(error)
       }`,
