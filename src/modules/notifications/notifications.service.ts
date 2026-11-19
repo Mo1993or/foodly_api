@@ -342,7 +342,7 @@ export class NotificationsService {
       }
     }
      console.log(
-      `La commande  a été enregistrée,et  envoyée : push ${sent} fail ${failed}`,
+      `La commande  a été enregistrée,et  envoyée : push ${sent} fail ${failed.valueOf}`,
     );
     return {
       success: true,

@@ -246,7 +246,7 @@ for (const order of createdOrders) {
   }
 
   try {
-    await this.notificationsService.sendToUser(
+   var result = await this.notificationsService.sendToUser(
       restaurant.ownerId.toString(),
       'Nouvelle commande reçue',
       `Vous avez reçu une nouvelle commande de ${order.total} FCFA.`,
@@ -259,7 +259,7 @@ for (const order of createdOrders) {
       },
     );
      console.log(
-      `La commande ${order._id} a été enregistrée,et  envoyée :`,
+      `La commande ${order._id} a été enregistrée,et  envoyée : push ${result}`,
     );
   } catch (error) {
     console.log(
