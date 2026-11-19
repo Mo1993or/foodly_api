@@ -341,7 +341,9 @@ export class NotificationsService {
         );
       }
     }
-
+     console.log(
+      `La commande  a été enregistrée,et  envoyée : push ${sent} fail ${failed}`,
+    );
     return {
       success: true,
       sent,

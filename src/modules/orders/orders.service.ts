@@ -258,6 +258,9 @@ for (const order of createdOrders) {
         status: OrderStatus.PENDING,
       },
     );
+     console.log(
+      `La commande ${order._id} a été enregistrée,et  envoyée :`,
+    );
   } catch (error) {
     console.log(
       `La commande ${order._id} a été enregistrée, mais la notification du restaurateur n'a pas pu être envoyée : ${
